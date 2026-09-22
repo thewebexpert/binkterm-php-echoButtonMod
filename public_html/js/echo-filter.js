@@ -17,21 +17,13 @@
             const urlParams = new URLSearchParams(window.location.search);
             const netParam = urlParams.get('net');
             if (netParam) {
-                return netParam.toLowerCase();
+                return netParam.trim().toLowerCase();
             }
 
-            // 2. Check user-scoped UserStorage if available
-            if (window.UserStorage && typeof window.UserStorage.getItem === 'function') {
-                const userVal = window.UserStorage.getItem('echo_filter_network');
-                if (userVal) {
-                    return userVal.toLowerCase();
-                }
-            }
-
-            // 3. Fallback to localStorage
+            // 2. Fallback to localStorage
             const localVal = localStorage.getItem(STORAGE_KEY);
             if (localVal) {
-                return localVal.toLowerCase();
+                return localVal.trim().toLowerCase();
             }
         } catch (e) {
             // Storage access blocked or unavailable
@@ -41,17 +33,15 @@
 
     function setSavedNetwork(net) {
         try {
-            if (window.UserStorage && typeof window.UserStorage.setItem === 'function') {
-                window.UserStorage.setItem('echo_filter_network', net);
-            }
-            localStorage.setItem(STORAGE_KEY, net);
+            const normalized = (net || 'all').trim().toLowerCase();
+            localStorage.setItem(STORAGE_KEY, normalized);
 
             // Update URL query parameter without reloading
             const url = new URL(window.location);
-            if (!net || net === 'all') {
+            if (normalized === 'all') {
                 url.searchParams.delete('net');
             } else {
-                url.searchParams.set('net', net);
+                url.searchParams.set('net', normalized);
             }
             window.history.replaceState({}, '', url);
         } catch (e) {
@@ -119,27 +109,37 @@
 
         let activeNetwork = getSavedNetwork();
 
-        // Hook into Binkterm's core populateNetworkFilter if available
-        // to ensure the dropdown checkboxes receive the activeNetwork immediately
-        if (typeof window.populateNetworkFilter === 'function') {
-            const originalPopulateNetworkFilter = window.populateNetworkFilter;
-            window.populateNetworkFilter = function () {
-                originalPopulateNetworkFilter.apply(this, arguments);
-                applyNetworkToDropdown(activeNetwork);
-            };
+        // Hook into Binkterm's core populateNetworkFilter so that whenever Binkterm
+        // generates or regenerates the network checkboxes, our activeNetwork is
+        // checked before Binkterm runs searchEchoAreas().
+        function hookBinktermDropdown() {
+            if (typeof window.populateNetworkFilter === 'function' && !window.populateNetworkFilter.__hookedByEchoMod) {
+                const originalPopulate = window.populateNetworkFilter;
+                window.populateNetworkFilter = function () {
+                    originalPopulate.apply(this, arguments);
+                    const currentNet = getSavedNetwork();
+                    if (currentNet && currentNet !== 'all') {
+                        applyNetworkToDropdown(currentNet);
+                    }
+                };
+                window.populateNetworkFilter.__hookedByEchoMod = true;
+            }
         }
+        hookBinktermDropdown();
 
         // Wait for allEchoAreas to be populated by Binkterm
         let pollCount = 0;
         function populateButtonsWhenReady() {
+            hookBinktermDropdown();
+
             if (typeof allEchoAreas !== 'undefined' && Array.isArray(allEchoAreas) && allEchoAreas.length > 0) {
                 renderNetworkButtons(allEchoAreas);
                 syncQuickActionStates();
-                // Ensure initial filter is applied to the message areas
+                // Apply the saved active network to the view
                 if (activeNetwork !== 'all') {
                     selectNetwork(activeNetwork, false);
                 }
-            } else if (pollCount < 40) { // 4 seconds max
+            } else if (pollCount < 60) { // 6 seconds max
                 pollCount++;
                 setTimeout(populateButtonsWhenReady, 100);
             }
@@ -161,17 +161,6 @@
                     domainCounts[dom] = (domainCounts[dom] || 0) + 1;
                 }
             });
-
-            // Validate that activeNetwork actually exists in the available areas
-            if (activeNetwork !== 'all') {
-                if (activeNetwork === '__local__' && localCount === 0) {
-                    activeNetwork = 'all';
-                    setSavedNetwork('all');
-                } else if (activeNetwork !== '__local__' && !domainCounts[activeNetwork]) {
-                    activeNetwork = 'all';
-                    setSavedNetwork('all');
-                }
-            }
 
             // Update total badge
             const badgeTotal = document.getElementById('echo-badge-total');
@@ -259,13 +248,13 @@
         }
 
         function selectNetwork(net, savePref = true) {
-            activeNetwork = net;
+            activeNetwork = (net || 'all').toLowerCase();
             if (savePref) {
-                setSavedNetwork(net);
+                setSavedNetwork(activeNetwork);
             }
 
-            updateButtonStyles(net);
-            applyNetworkToDropdown(net);
+            updateButtonStyles(activeNetwork);
+            applyNetworkToDropdown(activeNetwork);
 
             if (typeof searchEchoAreas === 'function') {
                 const searchInputVal = document.getElementById('areaSearch') ? document.getElementById('areaSearch').value : '';
