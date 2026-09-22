@@ -9,6 +9,56 @@
 (function () {
     'use strict';
 
+    const STORAGE_KEY = 'binkterm_echo_filter_network';
+
+    function getSavedNetwork() {
+        try {
+            // 1. Check URL query parameter (?net=...)
+            const urlParams = new URLSearchParams(window.location.search);
+            const netParam = urlParams.get('net');
+            if (netParam) {
+                return netParam.toLowerCase();
+            }
+
+            // 2. Check user-scoped UserStorage if available
+            if (window.UserStorage && typeof window.UserStorage.getItem === 'function') {
+                const userVal = window.UserStorage.getItem('echo_filter_network');
+                if (userVal) {
+                    return userVal.toLowerCase();
+                }
+            }
+
+            // 3. Fallback to localStorage
+            const localVal = localStorage.getItem(STORAGE_KEY);
+            if (localVal) {
+                return localVal.toLowerCase();
+            }
+        } catch (e) {
+            // Storage access blocked or unavailable
+        }
+        return 'all';
+    }
+
+    function setSavedNetwork(net) {
+        try {
+            if (window.UserStorage && typeof window.UserStorage.setItem === 'function') {
+                window.UserStorage.setItem('echo_filter_network', net);
+            }
+            localStorage.setItem(STORAGE_KEY, net);
+
+            // Update URL query parameter without reloading
+            const url = new URL(window.location);
+            if (!net || net === 'all') {
+                url.searchParams.delete('net');
+            } else {
+                url.searchParams.set('net', net);
+            }
+            window.history.replaceState({}, '', url);
+        } catch (e) {
+            // Storage access blocked or unavailable
+        }
+    }
+
     function initEchoButtonMod() {
         const echolistPage = document.getElementById('echolist-page');
         if (!echolistPage) {
@@ -67,7 +117,17 @@
 
         searchCardBody.appendChild(toolbar);
 
-        let activeNetwork = 'all';
+        let activeNetwork = getSavedNetwork();
+
+        // Hook into Binkterm's core populateNetworkFilter if available
+        // to ensure the dropdown checkboxes receive the activeNetwork immediately
+        if (typeof window.populateNetworkFilter === 'function') {
+            const originalPopulateNetworkFilter = window.populateNetworkFilter;
+            window.populateNetworkFilter = function () {
+                originalPopulateNetworkFilter.apply(this, arguments);
+                applyNetworkToDropdown(activeNetwork);
+            };
+        }
 
         // Wait for allEchoAreas to be populated by Binkterm
         let pollCount = 0;
@@ -75,6 +135,10 @@
             if (typeof allEchoAreas !== 'undefined' && Array.isArray(allEchoAreas) && allEchoAreas.length > 0) {
                 renderNetworkButtons(allEchoAreas);
                 syncQuickActionStates();
+                // Ensure initial filter is applied to the message areas
+                if (activeNetwork !== 'all') {
+                    selectNetwork(activeNetwork, false);
+                }
             } else if (pollCount < 40) { // 4 seconds max
                 pollCount++;
                 setTimeout(populateButtonsWhenReady, 100);
@@ -98,6 +162,17 @@
                 }
             });
 
+            // Validate that activeNetwork actually exists in the available areas
+            if (activeNetwork !== 'all') {
+                if (activeNetwork === '__local__' && localCount === 0) {
+                    activeNetwork = 'all';
+                    setSavedNetwork('all');
+                } else if (activeNetwork !== '__local__' && !domainCounts[activeNetwork]) {
+                    activeNetwork = 'all';
+                    setSavedNetwork('all');
+                }
+            }
+
             // Update total badge
             const badgeTotal = document.getElementById('echo-badge-total');
             if (badgeTotal) {
@@ -105,18 +180,20 @@
             }
 
             // Build buttons HTML
+            const isAllActive = (activeNetwork === 'all');
             let html = `
-                <button type="button" class="btn btn-sm btn-primary active echo-btn" data-net="all">
+                <button type="button" class="btn btn-sm ${isAllActive ? 'btn-primary active' : 'btn-outline-secondary'} echo-btn" data-net="all">
                     <i class="fas fa-border-all me-1"></i> ALL
-                    <span class="badge bg-dark ms-1">${areas.length}</span>
+                    <span class="badge ${isAllActive ? 'bg-dark' : 'bg-secondary'} ms-1">${areas.length}</span>
                 </button>
             `;
 
             if (localCount > 0) {
+                const isLocalActive = (activeNetwork === '__local__');
                 html += `
-                    <button type="button" class="btn btn-sm btn-outline-secondary echo-btn" data-net="__local__">
+                    <button type="button" class="btn btn-sm ${isLocalActive ? 'btn-primary active' : 'btn-outline-secondary'} echo-btn" data-net="__local__">
                         <i class="fas fa-home me-1"></i> LOCAL
-                        <span class="badge bg-secondary ms-1">${localCount}</span>
+                        <span class="badge ${isLocalActive ? 'bg-dark' : 'bg-secondary'} ms-1">${localCount}</span>
                     </button>
                 `;
             }
@@ -126,10 +203,11 @@
             domains.forEach(function (dom) {
                 const count = domainCounts[dom];
                 const label = dom.toUpperCase();
+                const isNetActive = (activeNetwork === dom);
                 html += `
-                    <button type="button" class="btn btn-sm btn-outline-secondary echo-btn" data-net="${dom}">
+                    <button type="button" class="btn btn-sm ${isNetActive ? 'btn-primary active' : 'btn-outline-secondary'} echo-btn" data-net="${dom}">
                         <i class="fas fa-comments me-1"></i> ${label}
-                        <span class="badge bg-secondary ms-1">${count}</span>
+                        <span class="badge ${isNetActive ? 'bg-dark' : 'bg-secondary'} ms-1">${count}</span>
                     </button>
                 `;
             });
@@ -141,44 +219,55 @@
                 btn.addEventListener('click', function () {
                     this.blur();
                     const net = this.getAttribute('data-net');
-                    selectNetwork(net);
+                    selectNetwork(net, true);
                 });
             });
         }
 
-        function selectNetwork(net) {
-            activeNetwork = net;
+        function updateButtonStyles(net) {
             const netContainer = document.getElementById('echo-network-buttons');
+            if (!netContainer) return;
 
-            // Update button styles: btn-primary for active, btn-outline-secondary for inactive
-            if (netContainer) {
-                netContainer.querySelectorAll('.echo-btn').forEach(function (btn) {
-                    const badge = btn.querySelector('.badge');
-                    if (btn.getAttribute('data-net') === net) {
-                        btn.className = 'btn btn-sm btn-primary active echo-btn';
-                        if (badge) badge.className = 'badge bg-dark ms-1';
-                    } else {
-                        btn.className = 'btn btn-sm btn-outline-secondary echo-btn';
-                        if (badge) badge.className = 'badge bg-secondary ms-1';
-                    }
-                });
+            netContainer.querySelectorAll('.echo-btn').forEach(function (btn) {
+                const badge = btn.querySelector('.badge');
+                if (btn.getAttribute('data-net') === net) {
+                    btn.className = 'btn btn-sm btn-primary active echo-btn';
+                    if (badge) badge.className = 'badge bg-dark ms-1';
+                } else {
+                    btn.className = 'btn btn-sm btn-outline-secondary echo-btn';
+                    if (badge) badge.className = 'badge bg-secondary ms-1';
+                }
+            });
+        }
+
+        function applyNetworkToDropdown(net) {
+            const dropdown = document.getElementById('networkDropdown');
+            if (!dropdown) return;
+
+            const checkboxes = dropdown.querySelectorAll('.network-cb');
+            checkboxes.forEach(function (cb) {
+                if (net === 'all') {
+                    cb.checked = false; // "all" means none filtered
+                } else {
+                    cb.checked = (cb.value.toLowerCase() === net.toLowerCase());
+                }
+            });
+
+            if (typeof updateNetworkPickerLabel === 'function') {
+                updateNetworkPickerLabel();
+            }
+        }
+
+        function selectNetwork(net, savePref = true) {
+            activeNetwork = net;
+            if (savePref) {
+                setSavedNetwork(net);
             }
 
-            // Sync with Binkterm's core network dropdown checkboxes
-            const dropdown = document.getElementById('networkDropdown');
-            if (dropdown && typeof searchEchoAreas === 'function') {
-                const checkboxes = dropdown.querySelectorAll('.network-cb');
-                checkboxes.forEach(function (cb) {
-                    if (net === 'all') {
-                        cb.checked = false; // "all" means none filtered
-                    } else {
-                        cb.checked = (cb.value.toLowerCase() === net.toLowerCase());
-                    }
-                });
+            updateButtonStyles(net);
+            applyNetworkToDropdown(net);
 
-                if (typeof updateNetworkPickerLabel === 'function') {
-                    updateNetworkPickerLabel();
-                }
+            if (typeof searchEchoAreas === 'function') {
                 const searchInputVal = document.getElementById('areaSearch') ? document.getElementById('areaSearch').value : '';
                 searchEchoAreas(searchInputVal);
             }
@@ -258,6 +347,37 @@
         if (unreadCb) {
             unreadCb.addEventListener('change', syncQuickActionStates);
         }
+
+        // Listen for changes on Binkterm's core network dropdown to keep buttons synchronized
+        const networkDropdown = document.getElementById('networkDropdown');
+        if (networkDropdown) {
+            networkDropdown.addEventListener('change', function (e) {
+                if (e.target && e.target.classList.contains('network-cb')) {
+                    const checkedCbs = networkDropdown.querySelectorAll('.network-cb:checked');
+                    if (checkedCbs.length === 1) {
+                        const net = checkedCbs[0].value.toLowerCase();
+                        activeNetwork = net;
+                        setSavedNetwork(net);
+                        updateButtonStyles(net);
+                    } else if (checkedCbs.length === 0) {
+                        activeNetwork = 'all';
+                        setSavedNetwork('all');
+                        updateButtonStyles('all');
+                    } else {
+                        // Multi-selection: un-highlight single buttons
+                        updateButtonStyles('multiple');
+                    }
+                }
+            });
+        }
+
+        // Listen for browser Back/Forward navigation
+        window.addEventListener('popstate', function () {
+            const currentSaved = getSavedNetwork();
+            if (currentSaved !== activeNetwork) {
+                selectNetwork(currentSaved, false);
+            }
+        });
 
         // Kick off button population
         populateButtonsWhenReady();
