@@ -1,21 +1,33 @@
 # Binkterm Echo Area Button Mod
 
-A zero-touch, client-side plugin for [BinktermPHP](https://github.com/awehttam/binkterm-php) that adds a sleek **Quick Network Filters** and **Quick Actions** button bar to the Echo List page (`/echolist`).
+A zero-touch, client-side plugin for [BinktermPHP](https://github.com/awehttam/binkterm-php) that adds sleek **Quick Network Filters**, **Quick Sub-Area Filters**, and **Quick Actions** toolbars to both the Echo List page (`/echolist`) and the Echomail Message reader (`/echomail`).
 
-It populates the empty space directly beneath the "Search Messages" box, allowing users to filter echo areas by FTN network with one click and quickly access frequent echomail actions.
+It allows users to filter echo areas by FTN network, drill down into specific sub-areas with one click, search message content from the top of the page, and seamlessly toggle back and forth between the Area List view and Message reader while preserving the active network and area filters.
 
 ---
 
 ## Features
 
 - **Zero-Touch & Upgrade-Proof**: Never alters any core BinktermPHP templates or backend routes. Future `git pull upstream` updates merge cleanly without conflicts.
+- **Dual-View Support (`/echolist` & `/echomail`)**:
+  - Full support on both the `/echolist` forum area overview and the `/echomail` message reader.
+  - Effortless 1-click **View Toggle** (`Area List` ↔ `Messages`) in both the card header and quick actions toolbar that preserves your selected network and sub-area parameters.
 - **Dynamic Network Filter Pills**:
-  - Automatically discovers all connected networks from the active echo area list (e.g. `ALL`, `LOCAL`, `DOVENET`, `FSXNET`, `LOVLYNET`, `FIDONET`).
+  - Automatically discovers all connected networks from the active echo area list (e.g. `ALL`, `LOCAL`, `DOVENET`, `FSXNET`, `LOVLYNET`, `FIDONET`, `SYSOPNET`, `TQWNET`, `ZERONET`).
   - Displays live area count badges on each button.
   - One-click instant filtering without page reloads.
+- **Interactive Quick Sub-Area Filters**:
+  - Dynamically populates all sub-areas belonging to the currently selected network (or all areas).
+  - Shows live unread and message count badges per sub-area.
+  - Includes a quick real-time sub-area search/filter input.
+  - On `/echolist`: Instantly filters the list view down to the selected sub-area.
+  - On `/echomail`: Instantly switches the active message reader to that sub-area's messages.
+- **Top Message Search on `/echomail`**:
+  - Directly exposes message content search at the top of `/echomail`.
 - **Quick Action Buttons**:
   - **Subscribed Only**: Quick toggle to show only your subscribed echo areas.
   - **Unread Only**: Quick toggle to show only areas with unread messages.
+  - **Area List / Messages**: 1-click toggle between list view and message view.
   - **New Post**: Launches the native compose modal immediately.
   - **Manage**: Direct shortcut to `/subscriptions`.
 - **Theme-Integrated & Flash-Free**:
