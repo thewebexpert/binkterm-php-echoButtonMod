@@ -124,6 +124,19 @@
         let showSubscribedOnly = false;
         let showUnreadOnly = false;
 
+        // Install AJAX prefilter so /api/messages/echomail automatically carries active network
+        if (typeof $ !== 'undefined' && typeof $.ajaxPrefilter === 'function' && !$.ajaxPrefilter.__echoFilterHooked) {
+            $.ajaxPrefilter(function (options, originalOptions, jqXHR) {
+                if (options.url && options.url.match(/^\/api\/messages\/echomail(?:\?|$)/)) {
+                    if (activeNetwork && activeNetwork !== 'all') {
+                        const separator = options.url.includes('?') ? '&' : '?';
+                        options.url += separator + 'network=' + encodeURIComponent(activeNetwork);
+                    }
+                }
+            });
+            $.ajaxPrefilter.__echoFilterHooked = true;
+        }
+
         function getToggleUrl(target) {
             const net = activeNetwork && activeNetwork !== 'all' ? activeNetwork : null;
             if (target === 'messages') {
@@ -519,7 +532,7 @@
 
             if (savePref) {
                 setSavedNetwork(activeNetwork);
-                updateUrlParams({ area: null });
+                updateUrlParams({ net: activeNetwork === 'all' ? null : activeNetwork, area: null });
             }
 
             updateButtonStyles(activeNetwork);
@@ -535,10 +548,16 @@
                     searchEchoAreas('');
                 }
             } else if (isEchoMail) {
-                // If on echomail, selecting network resets subarea
+                if (typeof applyEchoareaFilter === 'function') {
+                    applyEchoareaFilter();
+                }
                 if (typeof selectEchoarea === 'function') {
                     selectEchoarea(null);
                 }
+                if (savePref) {
+                    updateUrlParams({ net: activeNetwork === 'all' ? null : activeNetwork, area: null });
+                }
+                updateMessagesHeaderForNetwork();
             }
 
             updateAllToggleLinks();
@@ -580,12 +599,13 @@
                 }
             } else if (isEchoMail) {
                 if (activeSubArea === 'all') {
-                    updateUrlParams({ area: null });
                     if (typeof selectEchoarea === 'function') {
                         selectEchoarea(null);
                     }
+                    updateUrlParams({ net: activeNetwork === 'all' ? null : activeNetwork, area: null });
+                    updateMessagesHeaderForNetwork();
                 } else {
-                    updateUrlParams({ area: subarea });
+                    updateUrlParams({ net: activeNetwork === 'all' ? null : activeNetwork, area: subarea });
                     if (typeof selectEchoarea === 'function') {
                         selectEchoarea(fulltag);
                     }
@@ -627,6 +647,76 @@
             }
         }
 
+        function updateMessagesHeaderForNetwork() {
+            if (!isEchoMail) return;
+            if (activeNetwork && activeNetwork !== 'all' && (!window.currentEchoarea || activeSubArea === 'all')) {
+                const netLabel = (activeNetwork === '__local__' || activeNetwork === 'local') ? 'LOCAL' : activeNetwork.toUpperCase();
+                const titleEl = document.getElementById('messagesHeaderTitle');
+                if (titleEl) {
+                    titleEl.textContent = `Recent Messages (${netLabel})`;
+                }
+                const echoTitleEl = document.getElementById('echoTitle');
+                if (echoTitleEl) {
+                    echoTitleEl.textContent = `All ${netLabel} Messages`;
+                }
+            }
+        }
+
+        function hookApplyEchoareaFilter() {
+            if (typeof window.applyEchoareaFilter === 'function' && !window.applyEchoareaFilter.__hookedByEchoMod) {
+                const originalApply = window.applyEchoareaFilter;
+                window.applyEchoareaFilter = function () {
+                    if (activeNetwork && activeNetwork !== 'all' && typeof allEchoareas !== 'undefined' && Array.isArray(allEchoareas)) {
+                        let filtered = allEchoareas;
+                        if (activeNetwork === '__local__' || activeNetwork === 'local') {
+                            filtered = filtered.filter(a => !!a.is_local);
+                        } else {
+                            filtered = filtered.filter(a => (a.domain || '').toLowerCase() === activeNetwork);
+                        }
+                        if (typeof areaListInterestFilter !== 'undefined' && areaListInterestFilter !== null) {
+                            filtered = filtered.filter(area =>
+                                (area.interest_ids || []).includes(areaListInterestFilter)
+                            );
+                        }
+                        if (typeof echoareaSearchQuery !== 'undefined' && echoareaSearchQuery.length > 0) {
+                            filtered = filtered.filter(area =>
+                                area.tag.toLowerCase().includes(echoareaSearchQuery) ||
+                                (area.description && area.description.toLowerCase().includes(echoareaSearchQuery))
+                            );
+                        }
+                        if (typeof displayEchoareas === 'function') {
+                            displayEchoareas(filtered);
+                        }
+                        if (typeof displayMobileEchoareas === 'function') {
+                            displayMobileEchoareas(filtered);
+                        }
+                        return;
+                    }
+                    originalApply.apply(this, arguments);
+                };
+                window.applyEchoareaFilter.__hookedByEchoMod = true;
+            }
+        }
+
+        function hookDisplayMessages() {
+            if (typeof window.displayMessages === 'function' && !window.displayMessages.__hookedByEchoMod) {
+                const originalDisplay = window.displayMessages;
+                window.displayMessages = function (messages, isThreaded) {
+                    let filtered = messages;
+                    if (activeNetwork && activeNetwork !== 'all' && (!window.currentEchoarea || activeSubArea === 'all') && Array.isArray(messages)) {
+                        if (activeNetwork === '__local__' || activeNetwork === 'local') {
+                            filtered = messages.filter(m => !m.echoarea_domain);
+                        } else {
+                            filtered = messages.filter(m => (m.echoarea_domain || '').toLowerCase() === activeNetwork);
+                        }
+                    }
+                    originalDisplay.call(this, filtered, isThreaded);
+                    updateMessagesHeaderForNetwork();
+                };
+                window.displayMessages.__hookedByEchoMod = true;
+            }
+        }
+
         function hookEchomailSelect() {
             if (typeof window.selectEchoarea === 'function' && !window.selectEchoarea.__hookedByEchoMod) {
                 const originalSelect = window.selectEchoarea;
@@ -640,12 +730,16 @@
                             activeNetwork = dom;
                             setSavedNetwork(dom);
                             updateButtonStyles(dom);
+                            if (typeof applyEchoareaFilter === 'function') {
+                                applyEchoareaFilter();
+                            }
                         }
                         activeSubArea = subTag;
                         renderSubAreaButtons(allAreas, activeNetwork, activeSubArea);
                     } else {
                         activeSubArea = 'all';
                         renderSubAreaButtons(allAreas, activeNetwork, 'all');
+                        updateMessagesHeaderForNetwork();
                     }
                     updateAllToggleLinks();
                 };
@@ -788,6 +882,16 @@
                     if (typeof searchEchoAreas === 'function') {
                         searchEchoAreas(activeSubArea && activeSubArea !== 'all' ? activeSubArea : '');
                     }
+                } else if (isEchoMail) {
+                    if (typeof applyEchoareaFilter === 'function') {
+                        applyEchoareaFilter();
+                    }
+                    if (activeSubArea === 'all') {
+                        if (typeof selectEchoarea === 'function') {
+                            selectEchoarea(null);
+                        }
+                        updateMessagesHeaderForNetwork();
+                    }
                 }
             }
         });
@@ -795,6 +899,8 @@
         // Load Areas Data
         function onAreasReady() {
             if (isEchoMail) {
+                hookApplyEchoareaFilter();
+                hookDisplayMessages();
                 if (window.currentEchoarea) {
                     const parts = window.currentEchoarea.split('@');
                     activeSubArea = parts[0].toLowerCase();
@@ -818,6 +924,18 @@
                 if (activeSubArea && activeSubArea !== 'all') {
                     selectSubArea(activeSubArea, activeSubArea);
                 }
+            } else if (isEchoMail) {
+                if (activeNetwork !== 'all') {
+                    if (typeof applyEchoareaFilter === 'function') {
+                        applyEchoareaFilter();
+                    }
+                    if (!window.currentEchoarea || activeSubArea === 'all') {
+                        updateMessagesHeaderForNetwork();
+                        if (typeof loadMessages === 'function') {
+                            loadMessages();
+                        }
+                    }
+                }
             }
         }
 
@@ -835,6 +953,11 @@
             }
             checkEcholistAreas();
         } else if (isEchoMail) {
+            hookApplyEchoareaFilter();
+            hookDisplayMessages();
+            hookEchomailSelect();
+            updateMessagesHeaderForNetwork();
+
             // Fetch complete echoareas list from API
             if (typeof $ !== 'undefined' && typeof $.get === 'function') {
                 $.get('/api/echoareas')
