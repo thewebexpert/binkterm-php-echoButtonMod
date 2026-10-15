@@ -101,12 +101,20 @@
     }
 
     function initEchoButtonMod() {
+        // Strictly exclude Netmail and non-echomail pages
+        const pathname = window.location.pathname;
+        if (pathname === '/netmail' || pathname.startsWith('/netmail/') || pathname.startsWith('/compose/netmail')) {
+            return;
+        }
+
         const echolistPage = document.getElementById('echolist-page');
-        const isEchoList = !!echolistPage;
+        const isEchoList = !!echolistPage || pathname === '/echolist';
         const isEchoMail = !isEchoList && (
-            window.location.pathname === '/echomail' ||
-            window.location.pathname.startsWith('/echomail/') ||
-            !!document.getElementById('messagesContainer')
+            pathname === '/echomail' ||
+            pathname.startsWith('/echomail/') ||
+            !!document.getElementById('echoInfoBar') ||
+            !!document.getElementById('echoAreasCollapse') ||
+            !!document.getElementById('echoareasList')
         );
 
         if (!isEchoList && !isEchoMail) {
@@ -127,6 +135,13 @@
         // Install AJAX prefilter so /api/messages/echomail automatically carries active network
         if (typeof $ !== 'undefined' && typeof $.ajaxPrefilter === 'function' && !$.ajaxPrefilter.__echoFilterHooked) {
             $.ajaxPrefilter(function (options, originalOptions, jqXHR) {
+                // Strictly exclude Netmail
+                if (options.url && options.url.includes('/netmail')) {
+                    return;
+                }
+                if (window.location.pathname.startsWith('/netmail')) {
+                    return;
+                }
                 if (options.url && options.url.match(/^\/api\/messages\/echomail(?:\?|$)/)) {
                     if (activeNetwork && activeNetwork !== 'all') {
                         const separator = options.url.includes('?') ? '&' : '?';
@@ -663,9 +678,13 @@
         }
 
         function hookApplyEchoareaFilter() {
+            if (!isEchoMail || window.location.pathname.startsWith('/netmail')) return;
             if (typeof window.applyEchoareaFilter === 'function' && !window.applyEchoareaFilter.__hookedByEchoMod) {
                 const originalApply = window.applyEchoareaFilter;
                 window.applyEchoareaFilter = function () {
+                    if (window.location.pathname.startsWith('/netmail')) {
+                        return originalApply.apply(this, arguments);
+                    }
                     if (activeNetwork && activeNetwork !== 'all' && typeof allEchoareas !== 'undefined' && Array.isArray(allEchoareas)) {
                         let filtered = allEchoareas;
                         if (activeNetwork === '__local__' || activeNetwork === 'local') {
@@ -699,9 +718,13 @@
         }
 
         function hookDisplayMessages() {
+            if (!isEchoMail || window.location.pathname.startsWith('/netmail')) return;
             if (typeof window.displayMessages === 'function' && !window.displayMessages.__hookedByEchoMod) {
                 const originalDisplay = window.displayMessages;
                 window.displayMessages = function (messages, isThreaded) {
+                    if (!isEchoMail || window.location.pathname.startsWith('/netmail')) {
+                        return originalDisplay.call(this, messages, isThreaded);
+                    }
                     let filtered = messages;
                     if (activeNetwork && activeNetwork !== 'all' && (!window.currentEchoarea || activeSubArea === 'all') && Array.isArray(messages)) {
                         if (activeNetwork === '__local__' || activeNetwork === 'local') {
@@ -718,6 +741,7 @@
         }
 
         function hookEchomailSelect() {
+            if (!isEchoMail || window.location.pathname.startsWith('/netmail')) return;
             if (typeof window.selectEchoarea === 'function' && !window.selectEchoarea.__hookedByEchoMod) {
                 const originalSelect = window.selectEchoarea;
                 window.selectEchoarea = function (tag) {
