@@ -1,5 +1,7 @@
 # Binkterm Echo Area Button Mod
 
+# I merged these changes into BinkTermPHP so you no longer need this, it was fun while it lasted, but because changes are being accepted somewhat liberally, I think it helps the community more if I submit direct to the BBS
+
 A zero-touch, client-side plugin for [BinktermPHP](https://github.com/awehttam/binkterm-php) that adds sleek **Quick Network Filters**, **Quick Sub-Area Filters**, and **Quick Actions** toolbars to both the Echo List page (`/echolist`) and the Echomail Message reader (`/echomail`).
 
 It allows users to filter echo areas by FTN network, drill down into specific sub-areas with one click, search message content from the top of the page, and seamlessly toggle back and forth between the Area List view and Message reader while preserving the active network and area filters.
